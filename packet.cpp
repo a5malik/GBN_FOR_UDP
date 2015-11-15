@@ -6,10 +6,11 @@
 #include <sstream>
 #include <iostream>
 using namespace std;
-packet::packet(bool isack, bool isdata, bool isinit, int seq_n)
-	: ack(isack), data(isdata), init(isinit), seq_num(seq_n)
+packet::packet(bool isack, bool isdata, bool isinit, int seq_n, bool crpt)
+	: ack(isack), data(isdata), init(isinit), seq_num(seq_n), crp(crpt)
 {
 	this->payload[0] = '\0';
+	sent = false;
 }
 
 int packet::make_string(char s[])
@@ -18,8 +19,8 @@ int packet::make_string(char s[])
 	ss << this->seq_num;
 	string temp = ss.str();
 	char* num = (char*)temp.c_str();
-	sprintf(s, "ACK:%c INIT:%c DATA:%c SEQ:%s \n%s", (this->ack)?'1':'0', (this->init)?'1':'0', (this->data)?'1':'0', num, this->payload);
-	return 26+strlen(num)+strlen(this->payload);
+	sprintf(s, "ACK:%c INIT:%c DATA:%c CRP:%c SEQ:%s \n%s", (this->ack)?'1':'0', (this->init)?'1':'0', (this->data)?'1':'0',(this->crp)?'1':'0', num, this->payload);
+	return 31+strlen(num)+strlen(this->payload);
 	
 }
 
@@ -35,8 +36,9 @@ void packet::put_payload(char s[])
 	init = (s[11]=='0')?false:true;
 	//printf("%c %c %c %c %c\n", s[16], s[17], s[18], s[19], s[20]);
 	data = (s[18]=='0')?false:true;
+	crp = (s[24] == '0') ? false : true;
 	char num[7];
-	int i = 0, j = 24;
+	int i = 0, j = 30;
 	while(s[j]!=' ')
 	{
 		num[i] = s[j];

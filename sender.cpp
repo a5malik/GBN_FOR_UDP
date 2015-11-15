@@ -17,8 +17,13 @@
 #include <sys/stat.h> 
 #include <fcntl.h>
 #include <iostream>
+#include <time.h>
+#include <sys/time.h>
+
 
 #define BUFSIZE 1024
+
+#define TIMEOUT 500
 
 using namespace std;
 
@@ -41,15 +46,30 @@ int main(int argc, char **argv) {
   char *hostaddrp; /* dotted decimal host addr string */
   int optval; /* flag value for setsockopt */
   int n; /* message byte size */
-
+  int max_seq;
+  float crpt_rate, loss_rate;
+   srand (time(NULL));
+   fd_set fds;
+   struct timeval timeout;
+   int rc;
+   timeout.tv_sec = TIMEOUT/1000;
+   timeout.tv_usec = 0;
+   FD_ZERO(&fds);
+   
   /* 
    * check command line arguments 
    */
-  if (argc != 2) {
-    fprintf(stderr, "usage: %s <port>\n", argv[0]);
+  if (argc != 5) {
+    fprintf(stderr, "usage: %s <port> <corrupt_rate> <loss_rate> <window_size>\n", argv[0]);
     exit(1);
   }
   portno = atoi(argv[1]);
+  crpt_rate = atof(argv[2]);
+  loss_rate = atof(argv[3]);
+  int ws = atoi(argv[4]);
+  
+  printf("crpt_rate: %f\n", crpt_rate);
+  
 
   /* 
    * socket: create the parent socket 
@@ -57,7 +77,7 @@ int main(int argc, char **argv) {
   sockfd = socket(AF_INET, SOCK_DGRAM, 0);
   if (sockfd < 0) 
     error("ERROR opening socket");
-
+   
   /* setsockopt: Handy debugging trick that lets 
    * us rerun the server immediately after we kill it; 
    * otherwise we have to wait about 20 secs. 
@@ -113,97 +133,150 @@ int main(int argc, char **argv) {
     //printf("server received %d/%d bytes: %s\n", strlen(buf), n, buf);
     
     /* 
-     * sendto: echo the input back to the client 
+      sendto: echo the input back to the client 
      */
+	 /*
+	 */
 	 char bug[TOTAL_SIZE];
 	 int fd;
 	 char c;
-	 int ws = 1;
 	 int a;
+	 int base = 1, count = ws;
+	 max_seq = ws+2;
 	 packet pack = packet(&(buf[0]));
+	 packet initial = packet(false, false, true, max_seq);
+	 initial.make_string(bug);
+	  n = sendto(sockfd, bug, strlen(bug), 0, 
+							(struct sockaddr *) &clientaddr, clientlen);
+	  char buffer[PAYLOAD_SIZE];
+	  bzero(buffer, PAYLOAD_SIZE);
 	 packet to_send = packet(false, false, false, 1);
 	 printf("\nfile asked for %s\n", pack.payload);
+	 bool once_more = false;
 	 if((fd = open(pack.payload, O_RDONLY)) >= 0)
 	 {
 		  printf("file found\n");
 		 list<packet> window;
 		 int bytes = 0;
 		 int seq_num = 1;
-		 char buffer[PAYLOAD_SIZE];
-		 while((n=read(fd,&c, 1) == 1))
+		 bool is_wrong;
+		 n=read(fd,&c, 1);
+		 packet ackpack = packet(false, false, false, 1, false);
+		 while( n== 1 || once_more)
 		 {
+			 
 			 if (n < 0) error("ERROR reading from file");	
 			 // read PAYLOAD_SIZE bytes into buffer, put it into payload, push it to the list... and once i have window size or eof.. send them 1 by 1..
 			 //
 			 buffer[bytes++] = c;
-			 if(bytes == PAYLOAD_SIZE -1)
+			 if(bytes == PAYLOAD_SIZE -1 || once_more) // have 1 packet..
 			 {
 				 buffer[bytes] = '\0';
 				 //printf("\n buffer is %s\n", buffer);
-				 to_send = packet(false, true, false, seq_num++);
-				 to_send.put_payload(buffer);
-				 window.push_back(to_send);
-				 bytes = 0;
-				 bzero(buffer, PAYLOAD_SIZE);
-			 }
-			 if(window.size() == ws)
-			 {
-				 list<packet>::iterator i;
-				 printf("\nabout to send\n");
-				 for(i = window.begin(); i != window.end(); i++)
-				 {
-					 (*i).make_string(bug);
-					 printf("\n sending\n %s \n", bug);
-					  n = sendto(sockfd, bug, strlen(bug), 0, 
-							(struct sockaddr *) &clientaddr, clientlen);
-				 }
-				 while(window.size()>0)
-				 {
-					 printf("waiting for ack \n");
-					 n = recvfrom(sockfd, buf, BUFSIZE, 0,
-		 (struct sockaddr *) &clientaddr, &clientlen);
-					packet ackpack = packet(buf);
-					 printf("%d %d %d\n", ackpack.ack, ackpack.data,  ackpack.init );
-					printf("received ack for %d\n", ackpack.seq_num);
-					if(window.front().seq_num == ackpack.seq_num)
-						window.pop_front();
-					cin >> a;
-				 }
+				 if(rand()%100+1 >= 100*crpt_rate)
+					to_send = packet(false, true, false, seq_num);
+				 else
+					to_send = packet(false, true, false, seq_num, true);
 				
-			 }
-		 
-		 }
-		 
-				 buffer[bytes] = '\0';
-				 //printf("\n buffer is %s\n", buffer);
-				 to_send = packet(false, true, false, seq_num++);
+				 seq_num  = (seq_num+1)%max_seq;
+				 seq_num += (!seq_num)*1;
 				 to_send.put_payload(buffer);
 				 window.push_back(to_send);
 				 bytes = 0;
 				 bzero(buffer, PAYLOAD_SIZE);
-				 if(window.size() == ws)
+				 
+				  if( window.size() >= 1 && window.size() <= ws) 
 			 {
-				 list<packet>::iterator i;
+				 list<packet>::reverse_iterator i;
 				 printf("\nabout to send\n");
-				 for(i = window.begin(); i != window.end(); i++)
+				 //send the packets..
+				 for(i = window.rbegin(); i != window.rend() && !((*i).sent); i++)
 				 {
 					 (*i).make_string(bug);
-					 printf("\n sending\n %s \n", bug);
-					  n = sendto(sockfd, bug, strlen(bug), 0, 
+					 if(rand()%100+1 >= 100*loss_rate)
+					 {
+					 printf("\n sending packet  %d which is crp: %d \n", (*i).seq_num, (*i).crp);
+					 sendto(sockfd, bug, strlen(bug), 0, 
 							(struct sockaddr *) &clientaddr, clientlen);
+					 }
+					 else 
+					  printf("losing packet %d\n", (*i).seq_num);
+					 (*i).sent = true;
 				 }
-				 while(window.size()>0)
-				 {
-					 printf("waiting for ack \n");
-					 n = recvfrom(sockfd, buf, BUFSIZE, 0,
-		 (struct sockaddr *) &clientaddr, &clientlen);
-					packet ackpack = packet(buf);
-					printf("received ack for %d\n", ackpack.seq_num);
-					if(window.front().seq_num == ackpack.seq_num)
+				 //wait to receive something...
+				
+			 }//window size < ws...can make more packets and sent.. but anytime i have a packet ill send it..
+			  if(window.size() >= ws || once_more)
+				{
+					while(window.size() > 0)
+					{
+						is_wrong = false;
+					rc = 0;
+				
+					while(rc != 1 || is_wrong)
+					{
+					if(!is_wrong)
+					{
+							timeout.tv_sec = 0;
+							timeout.tv_usec = TIMEOUT * 1000;
+					}
+					FD_ZERO(&fds);
+					FD_SET(sockfd, &fds);
+					 rc = select(sockfd+1, &fds, NULL, NULL, &timeout);
+					 if (timeout.tv_usec == 0)
+						 timeout.tv_usec = TIMEOUT * 1000;
+					 if(rc == 0) //timeout
+					 {
+						 
+							list<packet>::iterator i;
+							printf("\nabout to RETRANSMIT\n");
+						//send the packets..
+						for(i = window.begin(); i != window.end()  ; i++)
+							{
+							(*i).crp = false;
+							(*i).make_string(bug);
+							printf("sending packet  %d which is crp: %d \n", (*i).seq_num, (*i).crp);
+							sendto(sockfd, bug, strlen(bug), 0, 
+									(struct sockaddr *) &clientaddr, clientlen);
+							(*i).sent = true;
+							}
+					 }
+					 else if(rc == 1)
+					 {
+						 recvfrom(sockfd, buf, BUFSIZE, 0,
+						(struct sockaddr *) &clientaddr, &clientlen);
+						ackpack = packet(buf);
+						printf("received ack for %d\n", ackpack.seq_num);
+						if((ackpack.seq_num == window.front().seq_num-1) || (ackpack.seq_num == ws+1 && window.front().seq_num == 1) || ackpack.crp)
+						{
+							printf("this ack was old : so crpt or some pkt was lost\n");
+							is_wrong = true;
+							printf("time remaining = %d\n", timeout.tv_usec);
+						}
+						else
+						is_wrong = false;
+						
+					 }
+					 
+					}
+					 
+					while(ackpack.seq_num != window.front().seq_num)
 						window.pop_front();
-					cin >> a;
-				 }
+					window.pop_front();
+						
+					
+						if(!once_more)
+							break;
+					}
+				}
 			 }
+			
+			if(once_more)
+				break;
+			n=read(fd,&c, 1);
+			if(n != 1)
+				once_more = true;
+		 }
 		 
 	 }
 	 close(fd);
@@ -211,7 +284,6 @@ int main(int argc, char **argv) {
 	 printf("%d %d %d\n", endpack.ack, endpack.data,  endpack.init );
 	 endpack.make_string(bug);
 	 printf("\n sending\n %s \n", bug);
-	 cin >> a;
 	// pack.make_string(bug);
     n = sendto(sockfd, bug, strlen(bug), 0, 
 	       (struct sockaddr *) &clientaddr, clientlen);
