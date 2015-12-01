@@ -23,7 +23,7 @@
 
 #define BUFSIZE 1024
 
-#define TIMEOUT 500
+#define TIMEOUT 250
 
 using namespace std;
 
@@ -233,11 +233,19 @@ int main(int argc, char **argv) {
 						//send the packets..
 						for(i = window.begin(); i != window.end()  ; i++)
 							{
-							(*i).crp = false;
+							if(rand()%100+1 >= 100*crpt_rate)
+								(*i).crp = false;
+							else
+								(*i).crp = true;
 							(*i).make_string(bug);
-							printf("sending packet  %d which is crp: %d \n", (*i).seq_num, (*i).crp);
-							sendto(sockfd, bug, strlen(bug), 0, 
-									(struct sockaddr *) &clientaddr, clientlen);
+							if(rand()%100+1 >= 100*loss_rate)
+								{
+									printf("\n sending packet  %d which is crp: %d \n", (*i).seq_num, (*i).crp);
+									sendto(sockfd, bug, strlen(bug), 0, 
+										(struct sockaddr *) &clientaddr, clientlen);
+								}
+							else 
+									printf("losing packet %d\n", (*i).seq_num);
 							(*i).sent = true;
 							}
 					 }

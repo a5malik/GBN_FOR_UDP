@@ -148,6 +148,10 @@ int main(int argc, char **argv) {
 			else
 			printf("received wrong seq_num = %d\n", recvd.seq_num);
 		  to_send.seq_num  = last_recvd;
+		  if(rand()%100+1 <= 100*crpt_rate)
+				to_send.crp = true;
+			else
+				to_send.crp = false;
 		to_send.make_string(send_string);
 		if(rand()%100+1 >= 100*loss_rate)
 		{
