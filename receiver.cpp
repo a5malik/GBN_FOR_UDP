@@ -114,6 +114,7 @@ int main(int argc, char **argv) {
 	int exp_seq = 1;
 	int last_recvd = max_seq-1;
 	int fd = open("antony", O_WRONLY);
+//	| O_CREAT, S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH);
 	while((recvd.ack || recvd.data || recvd.init))
 	{
 		printf("recevied packet %d \n", recvd.seq_num);

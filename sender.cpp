@@ -168,7 +168,8 @@ int main(int argc, char **argv) {
 			 if (n < 0) error("ERROR reading from file");	
 			 // read PAYLOAD_SIZE bytes into buffer, put it into payload, push it to the list... and once i have window size or eof.. send them 1 by 1..
 			 //
-			 buffer[bytes++] = c;
+			 if(!once_more)
+				buffer[bytes++] = c;
 			 if(bytes == PAYLOAD_SIZE -1 || once_more) // have 1 packet..
 			 {
 				 buffer[bytes] = '\0';
